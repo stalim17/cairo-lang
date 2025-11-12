@@ -23,14 +23,17 @@ py_library(
     name = "starkware_abstract_storage_lib",
     srcs = [
         "__init__.py",
+        "general_storage_config.py",
         "storage.py",
         "storage_conflict.py",
     ],
     deps = [
+        ":adversarial_gated_storage_types_lib",
         "//src/starkware/python:starkware_python_utils_lib",
         "//src/starkware/starkware_utils:starkware_config_utils_lib",
         "//src/starkware/starkware_utils:starkware_dataclasses_utils_lib",
         "//src/starkware/starkware_utils:starkware_serializability_utils_lib",
+        requirement("marshmallow_dataclass"),
     ],
 )
 
@@ -101,5 +104,17 @@ pytest_test(
         ":starkware_storage_lib",
         ":starkware_storage_test_utils_lib",
         requirement("pytest_asyncio"),
+    ],
+)
+
+py_library(
+    name = "adversarial_gated_storage_types_lib",
+    srcs = [
+        "adversarial_gated_storage_types.py",
+    ],
+    deps = [
+        "//src/starkware/starkware_utils:starkware_dataclasses_utils_lib",
+        requirement("marshmallow_dataclass"),
+        requirement("marshmallow_enum"),  # dep: ignore[Marshmallow implicit requirement]
     ],
 )

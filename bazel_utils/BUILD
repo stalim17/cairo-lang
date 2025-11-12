@@ -25,6 +25,16 @@ sh_binary(
     srcs = ["@solc-0.8.24//file"],
 )
 
+sh_binary(
+    name = "anvil",
+    srcs = ["@anvil//file"],
+)
+
+sh_binary(
+    name = "cast",
+    srcs = ["@cast//file"],
+)
+
 py_library(
     name = "default_extract_artifacts_lib",
     srcs = [

@@ -24,6 +24,7 @@ from starkware.python.utils import from_bytes, get_exception_repr, to_bytes
 from starkware.starkware_utils.config_base import get_object_by_path
 from starkware.starkware_utils.serializable import Serializable
 from starkware.starkware_utils.validated_dataclass import ValidatedDataclass
+from starkware.storage.general_storage_config import GeneralStorageConfig
 from starkware.storage.storage_conflict import StorageConflictError, StorageConflictStatus
 
 logger = logging.getLogger(__name__)
@@ -45,13 +46,19 @@ class Storage(ABC):
     """
 
     @staticmethod
-    async def create_instance_from_config(config: Dict[str, Any], logger=None) -> "Storage":
+    async def create_instance_from_config(
+        config: Dict[str, Any],
+        logger=None,
+        general_storage_config: GeneralStorageConfig = GeneralStorageConfig(),
+    ) -> "Storage":
         """
         Creates a Storage instance from a config dictionary.
         """
         storage_class = get_object_by_path(path=config["class"])
         if hasattr(storage_class, "create_from_config"):
-            storage_instance = await storage_class.create_from_config(**config["config"])
+            storage_instance = await storage_class.create_from_config(
+                **config["config"], general_storage_config=general_storage_config
+            )
         else:
             storage_instance = storage_class(**config.get("config", {}))
         assert isinstance(storage_instance, Storage)
@@ -257,6 +264,105 @@ class DBObject(Serializable):
         serialized = await asyncio.get_event_loop().run_in_executor(None, self.serialize)
         return await storage.setnx_value(self.db_key(suffix=suffix), value=serialized)
 
+    async def setnx_or_same(
+        self, storage: Storage, suffix: bytes, fields_to_ignore: Optional[List[str]] = None
+    ) -> Tuple[StorageConflictStatus, Optional["DBObject"]]:
+        """
+        Attempts to store the object with the given suffix if it doesn't exist.
+        If it does exist, checks if the existing object is the same as this one,
+        ignoring the fields specified by `fields_to_ignore` when comparing.
+        Returns the existing object if one exists and differs, None otherwise
+        """
+        obj_cls = type(self)
+        if await self.setnx(storage=storage, suffix=suffix) == True:
+            return StorageConflictStatus.NO_OBJECT, None
+
+        existing_obj = await obj_cls.get_or_fail(storage=storage, suffix=suffix)
+
+        # Make sure objects are of the same type.
+        if not isinstance(existing_obj, obj_cls):
+            return StorageConflictStatus.DIFFERENT_CLASS, existing_obj
+
+        # Create a deep copy of the current object and replace ignored fields with those
+        # of the existing object.
+        current_obj_to_compare = self
+        if fields_to_ignore is not None and len(fields_to_ignore) > 0:
+            field_overrides = {}
+            for field in fields_to_ignore:
+                if hasattr(current_obj_to_compare, field):
+                    try:
+                        field_overrides[field] = getattr(existing_obj, field)
+                    except AttributeError:
+                        continue
+            if dataclasses.is_dataclass(current_obj_to_compare):
+                current_obj_to_compare = dataclasses.replace(
+                    current_obj_to_compare, **field_overrides
+                )
+            else:
+                current_obj_to_compare = deepcopy(current_obj_to_compare)
+                for field, value in field_overrides.items():
+                    setattr(current_obj_to_compare, field, value)
+
+        if current_obj_to_compare == existing_obj:
+            return StorageConflictStatus.SAME_OBJECT, existing_obj
+
+        # A different object was found.
+        return StorageConflictStatus.DIFFERENT_OBJECT, existing_obj
+
+    async def handle_setnx_or_same_conflict(
+        self,
+        suffix: bytes,
+        existing_obj: Optional["DBObject"],
+        storage_conflict_status: StorageConflictStatus,
+    ):
+        """
+        Handles the conflict when attempting to set an object using `setnx_or_same`, but
+        an existing object is already present at the same `index`.
+
+        Raises:
+            StorageConflictError: If an object already exists at the intended `index`.
+        """
+        obj_cls = type(self)
+        key_type_str = "id" if issubclass(obj_cls, IndexedDBObject) else "suffix"
+        key_str = suffix.decode("ascii")
+        if storage_conflict_status == StorageConflictStatus.NO_OBJECT:
+            logger.debug(
+                f"Successfully set {obj_cls.__name__} at {key_type_str} {key_str} to {self}"
+            )
+        elif storage_conflict_status == StorageConflictStatus.SAME_OBJECT:
+            logger.warning(
+                f"Found existing {obj_cls.__name__} object in storage at {key_type_str} {key_str}"
+            )
+        else:
+            # Found a different object in storage at the same id.
+            # Should never get here!
+            logger.error(
+                f"Failed to write {obj_cls.__name__} object to storage at {key_type_str} {key_str},"
+                " due to a different object already set at the same suffix. This should never"
+                f" happen!\n Failed setting the object {self}\n Found object: {existing_obj}"
+            )
+            raise StorageConflictError(
+                obj_name=existing_obj.__class__.__name__,
+                existing_obj=existing_obj,
+                expected_obj=self,
+            )
+
+    async def setnx_or_fail(
+        self, storage: Storage, suffix: bytes, fields_to_ignore: Optional[List[str]] = None
+    ):
+        """
+        Attempts to store the object with the given index if it doesn't exist.
+        If finds a diffrent obj in the index raises an exception.
+        """
+        storage_conflict_status, existing_obj = await self.setnx_or_same(
+            storage=storage, suffix=suffix, fields_to_ignore=fields_to_ignore
+        )
+        await self.handle_setnx_or_same_conflict(
+            suffix=suffix,
+            existing_obj=existing_obj,
+            storage_conflict_status=storage_conflict_status,
+        )
+
     def get_update_for_mset(self, suffix: bytes) -> Tuple[bytes, bytes]:
         """
         Returns a (key, value) pair that can be converted to a dict for mset.
@@ -335,83 +441,6 @@ class IndexedDBObject(DBObject):
     async def setnx_obj(self, storage: Storage, index: int) -> bool:
         return await self.setnx(storage=storage, suffix=str(index).encode("ascii"))
 
-    async def setnx_or_same_obj(
-        self, storage: Storage, index: int, fields_to_ignore: Optional[List[str]] = None
-    ) -> Tuple[StorageConflictStatus, Optional["IndexedDBObject"]]:
-        """
-        Attempts to store the object with the given index if it doesn't exist.
-        If it does exist, checks if the existing object is the same as this one,
-        ignoring the fields specified by `fields_to_ignore` when comparing.
-        Returns the existing object if one exists and differs, None otherwise
-        """
-        obj_cls = type(self)
-        if await self.setnx_obj(storage=storage, index=index) == True:
-            return StorageConflictStatus.NO_OBJECT, None
-
-        existing_obj = await obj_cls.get_obj_or_fail(storage=storage, index=index)
-
-        # Make sure objects are of the same type.
-        if not isinstance(existing_obj, obj_cls):
-            return StorageConflictStatus.DIFFERENT_CLASS, existing_obj
-
-        # Create a deep copy of the current object and replace ignored fields with those
-        # of the existing object.
-        current_obj_to_compare = self
-        if fields_to_ignore is not None and len(fields_to_ignore) > 0:
-            field_overrides = {}
-            for field in fields_to_ignore:
-                if hasattr(current_obj_to_compare, field):
-                    try:
-                        field_overrides[field] = getattr(existing_obj, field)
-                    except AttributeError:
-                        continue
-            if dataclasses.is_dataclass(current_obj_to_compare):
-                current_obj_to_compare = dataclasses.replace(
-                    current_obj_to_compare, **field_overrides
-                )
-            else:
-                current_obj_to_compare = deepcopy(current_obj_to_compare)
-                for field, value in field_overrides.items():
-                    setattr(current_obj_to_compare, field, value)
-
-        if current_obj_to_compare == existing_obj:
-            return StorageConflictStatus.SAME_OBJECT, existing_obj
-
-        # A different object was found.
-        return StorageConflictStatus.DIFFERENT_OBJECT, existing_obj
-
-    async def handle_setnx_or_same_obj_conflict(
-        self,
-        index: int,
-        existing_obj: Optional["IndexedDBObject"],
-        storage_conflict_status: StorageConflictStatus,
-    ):
-        """
-        Handles the conflict when attempting to set an object using `setnx_or_same`, but
-        an existing object is already present at the same `index`.
-
-        Raises:
-            StorageConflictError: If an object already exists at the intended `index`.
-        """
-        obj_cls = type(self)
-        if storage_conflict_status == StorageConflictStatus.NO_OBJECT:
-            logger.debug(f"Successfully set {obj_cls.__name__} at {index=} to {self}")
-        elif storage_conflict_status == StorageConflictStatus.SAME_OBJECT:
-            logger.warning(f"Found existing {obj_cls.__name__} object in storage at id {index}")
-        else:
-            # Found a different object in storage at the same id.
-            # Should never get here!
-            logger.error(
-                f"Failed to write {obj_cls.__name__} object to storage at {index=}, due to a"
-                " different object already set at the same index. This should never happen!\n"
-                f" Failed setting the object {self}\n Found object: {existing_obj}"
-            )
-            raise StorageConflictError(
-                obj_name=existing_obj.__class__.__name__,
-                existing_obj=existing_obj,
-                expected_obj=self,
-            )
-
     async def setnx_or_fail_obj(
         self, storage: Storage, index: int, fields_to_ignore: Optional[List[str]] = None
     ):
@@ -419,11 +448,8 @@ class IndexedDBObject(DBObject):
         Attempts to store the object with the given index if it doesn't exist.
         If finds a diffrent obj in the index raises an exception.
         """
-        storage_conflict_status, existing_obj = await self.setnx_or_same_obj(
-            storage=storage, index=index, fields_to_ignore=fields_to_ignore
-        )
-        await self.handle_setnx_or_same_obj_conflict(
-            index=index, existing_obj=existing_obj, storage_conflict_status=storage_conflict_status
+        await self.setnx_or_fail(
+            storage=storage, suffix=str(index).encode("ascii"), fields_to_ignore=fields_to_ignore
         )
 
     def get_indexed_update_for_mset(self, index: int) -> Tuple[bytes, bytes]:

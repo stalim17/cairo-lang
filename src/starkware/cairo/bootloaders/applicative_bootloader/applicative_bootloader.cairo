@@ -76,10 +76,15 @@ func main{
     // Check that exactly one task was executed.
     assert aggregator_output_start[0] = 1;
 
-    // Extract the aggregator output size and program hash.
+    // Extract the aggregator output length (includes the header length (2)) and program hash.
     let aggregator_output_length = aggregator_output_start[1];
-    assert aggregator_output_length = aggregator_output_end - aggregator_output_start - 1;
     let aggregator_program_hash = aggregator_output_start[2];
+
+    // Sanity check, not contributing to soundness (as long as the simple bootloader is not
+    // changed).
+    assert aggregator_output_length = aggregator_output_end - aggregator_output_start - 1;
+
+    // Set the aggregator input pointer.
     let aggregator_input_ptr = &aggregator_output_start[3];
 
     // Allocate a segment for the bootloader output.
@@ -113,6 +118,8 @@ func main{
 
     // Execute the bootloader.
     run_bootloader{output_ptr=bootloader_output_ptr}();
+    local bootloader_output_end: felt* = bootloader_output_ptr;
+
     local range_check_ptr = range_check_ptr;
     local ecdsa_ptr = ecdsa_ptr;
     local bitwise_ptr = bitwise_ptr;
@@ -123,7 +130,6 @@ func main{
     local range_check96_ptr = range_check96_ptr;
     local add_mod_ptr = add_mod_ptr;
     local mul_mod_ptr = mul_mod_ptr;
-    local bootloader_output_end: felt* = bootloader_output_ptr;
 
     %{
         # Restore the output builtin state.
@@ -133,7 +139,10 @@ func main{
     // Output:
     // * The aggregator program hash, hashed with the word "AGGREGATOR".
     // * The bootloader config.
-    local output_start: felt* = output_ptr;
+
+    // Save the applicative bootloader output start.
+    let output_start: felt* = output_ptr;
+    // Use Pedersen hash as it's cheaper with Stwo.
     let (modified_aggregator_program_hash) = hash2{hash_ptr=pedersen_ptr}(
         AGGREGATOR_CONSTANT, aggregator_program_hash
     );

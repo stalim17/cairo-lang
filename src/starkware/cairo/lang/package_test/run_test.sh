@@ -33,14 +33,3 @@ cairo-reconstruct-traceback --version > /dev/null
 
 # Test cairo-migrate.
 cairo-migrate --help > /dev/null
-
-# Test StarkNet compiler.
-starknet-compile-deprecated ${root_dir}/src/starkware/starknet/apps/amm_sample/amm_sample.cairo \
-    > /dev/null
-
-# Test StarkNet CLI.
-starknet --help > /dev/null
-
-# Test starknet-class-hash and starknet-compiled-class-hash.
-starknet-class-hash --help > /dev/null
-starknet-compiled-class-hash --help > /dev/null

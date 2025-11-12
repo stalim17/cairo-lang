@@ -378,7 +378,7 @@ func unpack_plain_packed_task{
         assert task_output_offset = BOOTLOADER_CONFIG_SIZE + 1;
 
         // If the program is the applicative bootloader, adjust the header size to skip the
-        // bootloader config and the aggregator hash. Also, output the modified aggragator hash
+        // bootloader config and the aggregator hash. Also, output the modified aggregator hash
         // instead of the applicative bootloader hash.
         assert updated_task_output_header = TaskOutputHeader(
             size=task_header.size - task_output_offset, program_hash=task_output[0]

@@ -15,6 +15,7 @@ from starkware.cairo.common.patricia_utils import (
     NodeEdge,
     ParticiaGlobals,
     PatriciaUpdateConstants,
+    split_reads_writes,
 )
 
 // ADDITIONAL_IMPORTS_MACRO()
@@ -478,6 +479,58 @@ func patricia_update_using_update_constants{hash_ptr: HashBuiltin*, range_check_
         return ();
     }
 
+    let update_end = &update_ptr[n_updates];
+
+    alloc_locals;
+
+    // Traverse prev tree.
+    let (local original_siblings) = alloc();
+    let siblings = original_siblings;
+    with siblings {
+        traverse_prev_tree(
+            patricia_update_constants=patricia_update_constants,
+            update_ptr=update_ptr,
+            n_updates=n_updates,
+            height=height,
+            prev_root=prev_root,
+            new_root=new_root,
+        );
+    }
+    local siblings_end: felt* = siblings;
+
+    // Traverse new tree.
+    let siblings = original_siblings;
+    %{ vm_enter_scope(dict(node=node, **common_args)) %}
+    // Note: the height is enforced to be smaller or equal to MAX_LENGTH in `traverse_prev_tree`.
+    with update_ptr, siblings {
+        traverse_node(
+            globals=new ParticiaGlobals(
+                pow2=patricia_update_constants.globals_pow2, access_offset=DictAccess.new_value
+            ),
+            height=height,
+            path=0,
+            node=new_root,
+        );
+    }
+    %{ vm_exit_scope() %}
+    assert update_ptr = update_end;
+    assert siblings = siblings_end;
+    return ();
+}
+
+// Traverses the previous (pre-update) tree during a Patricia Merkle tree update operation.
+//
+// Guarantees:
+// * After execution, update_ptr will have advanced by n_updates entries.
+// * The siblings list will be populated with the sibling encoding from the previous tree.
+func traverse_prev_tree{hash_ptr: HashBuiltin*, range_check_ptr, siblings: felt*}(
+    patricia_update_constants: PatriciaUpdateConstants*,
+    update_ptr: DictAccess*,
+    n_updates: felt,
+    height: felt,
+    prev_root: felt,
+    new_root: felt,
+) {
     %{
         from starkware.cairo.common.patricia_utils import canonic, patricia_guess_descents
         from starkware.python.merkle_tree import build_update_tree
@@ -505,41 +558,84 @@ func patricia_update_using_update_constants{hash_ptr: HashBuiltin*, range_check_
             __patricia_skip_validation_runner=__patricia_skip_validation_runner)
         common_args['common_args'] = common_args
     %}
-    alloc_locals;
-    local update_end: DictAccess* = update_ptr + n_updates * DictAccess.SIZE;
+
+    let update_end: DictAccess* = &update_ptr[n_updates];
 
     // Traverse prev tree.
-    let (local siblings) = alloc();
-    let original_update_ptr = update_ptr;
-    let original_siblings = siblings;
-    let (local globals_prev: ParticiaGlobals*) = alloc();
-    assert [globals_prev] = ParticiaGlobals(
-        pow2=patricia_update_constants.globals_pow2, access_offset=DictAccess.prev_value
-    );
-
     assert_le(height, MAX_LENGTH);
     %{ vm_enter_scope(dict(node=node, **common_args)) %}
-    with update_ptr, siblings {
-        traverse_node(globals=globals_prev, height=height, path=0, node=prev_root);
+    with update_ptr {
+        traverse_node(
+            globals=new ParticiaGlobals(
+                pow2=patricia_update_constants.globals_pow2, access_offset=DictAccess.prev_value
+            ),
+            height=height,
+            path=0,
+            node=prev_root,
+        );
     }
     %{ vm_exit_scope() %}
     assert update_ptr = update_end;
-    local siblings_end: felt* = siblings;
+    return ();
+}
 
-    // Traverse new tree.
-    let update_ptr = original_update_ptr;
-    let siblings = original_siblings;
-    let (local globals_new: ParticiaGlobals*) = alloc();
-    assert [globals_new] = ParticiaGlobals(
-        pow2=patricia_update_constants.globals_pow2, access_offset=DictAccess.new_value
+// A variant of patricia_update that is optimized for read-heavy workloads.
+//
+// Performs the same verification as patricia_update_using_update_constants, but with the following
+// change: it splits the updates into reads and writes, then processes them differently:
+//
+// 1. Calls patricia_update_using_update_constants() with ONLY the
+//    writes. This is the expensive operation that traverses both prev and new trees.
+//
+// 2. For reads, only traverses the PREVIOUS tree (not both trees).
+//    Since reads don't change the tree structure, we only need to verify that the claimed values
+//    exist in the previous tree. We don't need to traverse the new tree because it's identical
+//    to the previous tree at these positions.
+//
+// Assumptions: Same as patricia_update_using_update_constants.
+func patricia_update_read_optimized{hash_ptr: HashBuiltin*, range_check_ptr}(
+    patricia_update_constants: PatriciaUpdateConstants*,
+    update_ptr: DictAccess*,
+    n_updates: felt,
+    height: felt,
+    prev_root: felt,
+    new_root: felt,
+) {
+    if (n_updates == 0) {
+        prev_root = new_root;
+        return ();
+    }
+
+    alloc_locals;
+
+    // Split updates into reads and writes.
+    let (
+        local n_reads: felt, local reads: DictAccess*, n_writes: felt, writes: DictAccess*
+    ) = split_reads_writes(n_updates=n_updates, update_ptr=update_ptr);
+
+    // Traverse both trees using only the writes.
+    patricia_update_using_update_constants(
+        patricia_update_constants=patricia_update_constants,
+        update_ptr=writes,
+        n_updates=n_writes,
+        height=height,
+        prev_root=prev_root,
+        new_root=new_root,
     );
 
-    %{ vm_enter_scope(dict(node=node, **common_args)) %}
-    with update_ptr, siblings {
-        traverse_node(globals=globals_new, height=height, path=0, node=new_root);
+    if (n_reads == 0) {
+        return ();
     }
-    %{ vm_exit_scope() %}
-    assert update_ptr = update_end;
-    assert siblings = siblings_end;
+
+    // Traverse the previous tree using the reads to verify their values.
+    let (siblings) = alloc();
+    traverse_prev_tree{siblings=siblings}(
+        patricia_update_constants=patricia_update_constants,
+        update_ptr=reads,
+        n_updates=n_reads,
+        height=height,
+        prev_root=prev_root,
+        new_root=new_root,
+    );
     return ();
 }

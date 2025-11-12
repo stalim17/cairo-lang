@@ -1,8 +1,9 @@
 import dataclasses
+import json
 import string
 from abc import ABC, abstractmethod
 from dataclasses import field
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Dict, List, Optional, Type, TypeVar, Union
 
 import marshmallow
 import marshmallow.fields as mfields
@@ -26,6 +27,8 @@ from starkware.cairo.lang.compiler.references import Reference
 from starkware.cairo.lang.compiler.scoped_name import ScopedName, ScopedNameAsStr
 from starkware.starkware_utils.marshmallow_dataclass_fields import IntAsHex, additional_metadata
 from starkware.starkware_utils.serializable_dataclass import SerializableMarshmallowDataclass
+
+TProgram = TypeVar("TProgram", bound="Program")
 
 
 @dataclasses.dataclass
@@ -107,6 +110,11 @@ class Program(ProgramBase, SerializableMarshmallowDataclass):
         if data["compiler_version"] is None:
             del data["compiler_version"]
         return data
+
+    @classmethod
+    def from_file(cls: Type[TProgram], file_path: str) -> TProgram:
+        with open(file_path, "r") as file:
+            return cls.Schema().load(json.load(file))
 
     def stripped(self) -> StrippedProgram:
         assert self.main is not None

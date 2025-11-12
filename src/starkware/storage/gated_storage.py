@@ -1,6 +1,7 @@
 import hashlib
 from typing import Any, Dict, Optional, Tuple
 
+from starkware.storage.general_storage_config import GeneralStorageConfig
 from starkware.storage.names import generate_unique_key
 from starkware.storage.storage import Storage
 
@@ -20,7 +21,11 @@ class GatedStorage(Storage):
 
     @classmethod
     async def create_from_config(
-        cls, limit: int, storage0_config: Dict[str, Any], storage1_config: Dict[str, Any]
+        cls,
+        limit: int,
+        storage0_config: Dict[str, Any],
+        storage1_config: Dict[str, Any],
+        general_storage_config: GeneralStorageConfig,
     ) -> "GatedStorage":
         return cls(
             limit=limit,

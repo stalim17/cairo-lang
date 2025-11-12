@@ -59,7 +59,7 @@ def to_jrpc_result_single(response: JsonObject) -> TJrpcResult:
 
 
 def to_jrpc_result(
-    response: Union[JsonObject, List[JsonObject]]
+    response: Union[JsonObject, List[JsonObject]],
 ) -> Union[TJrpcResult, List[TJrpcResult]]:
     """
     Parses the JSON response of a JRPC request into result(s). If a list of dicts is provided, each
@@ -193,7 +193,8 @@ class ClientBase(HasUriPrefix):
             n_retries_left -= 1
 
             try:
-                async with aiohttp.TCPConnector(ssl=self.ssl_context) as connector:
+                ssl_param = self.ssl_context or False
+                async with aiohttp.TCPConnector(ssl=ssl_param) as connector:
                     async with aiohttp.ClientSession(connector=connector) as session:
                         async with session.request(
                             method=send_method,

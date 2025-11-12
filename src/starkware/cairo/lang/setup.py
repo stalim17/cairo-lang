@@ -31,9 +31,6 @@ setuptools.setup(
         "starkware.crypto.signature": ["pedersen_params.json"],
         "starkware.starknet": [
             "common/*.cairo",
-            "definitions/*.yml",
-            "definitions/versioned_constants.json",
-            "builtins/segment_arena/segment_arena.cairo",
         ],
         "starkware.starknet.compiler.v1": [
             "*.json",
@@ -43,10 +40,6 @@ setuptools.setup(
             "sierra-compiler-major-*/bin/starknet-sierra-compile",
             "sierra-compiler-major-*/bin/starknet-compile",
         ],
-        "starkware.starknet.core.os": ["*/*.cairo", "*.cairo", "*.json"],
-        "starkware.starknet.core.test_contract": ["*.cairo", "*.json"],
-        "starkware.starknet.security": ["whitelists/*.json"],
-        "starkware.starknet.third_party.open_zeppelin": ["account.json"],
     },
     scripts=[
         "starkware/cairo/lang/scripts/cairo-compile",
@@ -56,9 +49,5 @@ setuptools.setup(
         "starkware/cairo/lang/scripts/cairo-reconstruct-traceback",
         "starkware/cairo/lang/scripts/cairo-run",
         "starkware/cairo/lang/scripts/cairo-sharp",
-        "starkware/starknet/scripts/starknet-class-hash",
-        "starkware/starknet/scripts/starknet-compiled-class-hash",
-        "starkware/starknet/scripts/starknet-compile-deprecated",
-        "starkware/starknet/scripts/starknet",
     ],
 )

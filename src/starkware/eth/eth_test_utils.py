@@ -8,6 +8,7 @@ import signal
 import subprocess
 import tempfile
 import time
+from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -23,10 +24,11 @@ from starkware.eth.web3_wrapper import Web3
 TIMEOUT_FOR_WEB3_REQUESTS = 120  # Seconds.
 
 # Max number of attempts to check web3.is_connected().
-GANACHE_MAX_TRIES = 60
+MAX_TRIES = 60
 logger = logging.getLogger(__name__)
 
 Abi = List[dict]
+ANVIL_BIN = "bazel_utils/anvil"
 
 
 def get_ganache_bin_path() -> str:
@@ -44,20 +46,20 @@ class EthTestUtils:
     Allows testing Ethereum contracts.
     """
 
-    def __init__(self):
-        self.ganache = Ganache()
-        self.w3 = self.ganache.w3
+    def __init__(self, use_anvil: bool = True):
+        self.test_node = Anvil() if use_anvil else Ganache()
+        self.w3 = self.test_node.w3
         self.accounts = [
-            EthAccount(w3=self.w3, address=account) for account in self.ganache.w3.eth.accounts
+            EthAccount(w3=self.w3, address=account) for account in self.test_node.w3.eth.accounts
         ]
 
     def stop(self):
-        self.ganache.stop()
+        self.test_node.stop()
 
     @classmethod
     @contextlib.contextmanager
-    def context_manager(cls):
-        res = cls()
+    def context_manager(cls, use_anvil: bool = True):
+        res = cls(use_anvil=use_anvil)
         try:
             yield res
         finally:
@@ -76,19 +78,7 @@ class EthTestUtils:
         return self.w3.eth.get_balance(address)
 
     def unlock_and_fund(self, addresses, amount=10**18):
-        for address in addresses:
-            self.w3.provider.make_request(
-                method=web3_types.RPCEndpoint("evm_unlockUnknownAccount"), params=[address]
-            )
-            self.w3.provider.make_request(
-                method=web3_types.RPCEndpoint("evm_addAccount"), params=[address, ""]
-            )
-            self.w3.provider.make_request(
-                method=web3_types.RPCEndpoint("personal_unlockAccount"), params=[address, "", 0]
-            )
-            self.w3.provider.make_request(
-                method=web3_types.RPCEndpoint("evm_setAccountBalance"), params=[address, amount]
-            )
+        self.test_node.unlock_and_fund(addresses=addresses, amount=amount)
 
     def get_contract(
         self,
@@ -114,30 +104,19 @@ class EthTestUtils:
 
     def set_account_balance(self, address: str, balance: int):
         assert balance >= 0, "Cannot set a negative balance."
-        self.w3.provider.make_request(
-            method=web3_types.RPCEndpoint("evm_setAccountBalance"), params=[address, balance]
-        )
+        self.test_node.set_account_balance(address, balance)
 
 
-class Ganache:
+class TestNode(ABC):
     """
-    Represents a running instance of ganache.
+    Base class for local test Ethereum nodes like Ganache and Anvil.
     """
 
-    def __init__(self):
-        """
-        Runs ganache.
-        Use stop() to ensure the process is killed at the end.
-        """
+    def __init__(self, command: str):
         self.err_stream = tempfile.NamedTemporaryFile()
         self.port = random.randrange(1024, 8192)
-        self.ganache_proc = subprocess.Popen(
-            f"{get_ganache_bin_path()} \
-                -p {self.port} \
-                --chain.chainId 32 \
-                --chain.networkId 32 \
-                --miner.blockGasLimit 8000000 \
-                --chain.allow-unlimited-contract-size",
+        self._proc = subprocess.Popen(
+            command.format(port=self.port),
             shell=True,
             stdout=subprocess.DEVNULL,
             stderr=self.err_stream,
@@ -149,32 +128,108 @@ class Ganache:
             HTTPProvider(f"http://localhost:{self.port}/", request_kwargs=request_kwargs)
         )
 
-        for _ in range(GANACHE_MAX_TRIES):
+        for _ in range(MAX_TRIES):
             time.sleep(1)
             if self.w3.is_connected():  # type: ignore
                 break
         else:
-            raise Exception("Could not connect to ganache.")
+            raise Exception(f"Could not connect to test node on port {self.port}.")
 
         self.is_alive = True
 
-    def __del__(self):
-        self.stop()
+    @abstractmethod
+    def set_account_balance(self, address: str, balance: int):
+        """
+        Sets eth balance (in wei).
+        """
+
+    @abstractmethod
+    def unlock_and_fund(self, addresses, amount):
+        """
+        Unlocks all the specified `addresses` and sets their eth balance to amount.
+        """
 
     def stop(self):
         if not self.is_alive:
             return
 
         # Kill the entire process group.
-        os.killpg(self.ganache_proc.pid, signal.SIGINT)
+        os.killpg(self._proc.pid, signal.SIGINT)
         self.is_alive = False
         # Capture errors.
         self.err_stream.flush()
         self.err_stream.seek(0)
         stderr_data = self.err_stream.read().decode()
         if len(stderr_data) > 0:
-            logger.error(f"Ganache stderr data:\n{str(stderr_data)}\n")
+            logger.error(f"local node stderr data:\n{stderr_data}\n")
         self.err_stream.close()
+
+    def __del__(self):
+        self.stop()
+
+
+class Ganache(TestNode):
+    """
+    Represents a running instance of Ganache.
+    """
+
+    def __init__(self):
+        logger.debug("using GANACHE")
+        command = (
+            f"{get_ganache_bin_path()} "
+            "-p {port} "
+            "--chain.chainId 32 "
+            "--chain.networkId 32 "
+            "--miner.blockGasLimit 8000000 "
+            "--chain.allow-unlimited-contract-size"
+        )
+        super().__init__(command)
+
+    def set_account_balance(self, address: str, balance: int):
+        self.w3.provider.make_request(
+            method=web3_types.RPCEndpoint("evm_setAccountBalance"), params=[address, balance]
+        )
+
+    def unlock_and_fund(self, addresses, amount):
+        for address in addresses:
+            self.w3.provider.make_request(
+                method=web3_types.RPCEndpoint("evm_unlockUnknownAccount"), params=[address]
+            )
+            self.w3.provider.make_request(
+                method=web3_types.RPCEndpoint("evm_addAccount"), params=[address, ""]
+            )
+            self.w3.provider.make_request(
+                method=web3_types.RPCEndpoint("personal_unlockAccount"), params=[address, "", 0]
+            )
+            self.set_account_balance(address=address, balance=amount)
+
+
+class Anvil(TestNode):
+    """
+    Represents a running instance of Anvil.
+    """
+
+    def __init__(self):
+        logger.debug("using ANVIL")
+        command = (
+            f"{ANVIL_BIN} "
+            "-p {port} "
+            "--chain-id 32 "
+            "--gas-limit 8000000 "
+            "--disable-code-size-limit "
+            "--auto-impersonate "
+        )
+        super().__init__(command)
+
+    def set_account_balance(self, address: str, balance: int):
+        self.w3.provider.make_request(
+            method=web3_types.RPCEndpoint("anvil_setBalance"), params=[address, balance]
+        )
+
+    def unlock_and_fund(self, addresses, amount):
+        for address in addresses:
+            # We don't need to unlock in anvil - we instanciate it with auto-unlock.
+            self.set_account_balance(address=address, balance=amount)
 
 
 class EthAccount:

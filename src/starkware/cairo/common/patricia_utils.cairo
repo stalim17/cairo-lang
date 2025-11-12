@@ -1,3 +1,6 @@
+from starkware.cairo.common.alloc import alloc
+from starkware.cairo.common.dict_access import DictAccess
+
 // Maximum length of an edge.
 const MAX_LENGTH = 251;
 
@@ -20,4 +23,50 @@ struct NodeEdge {
 // Holds the constants needed for Patricia updates.
 struct PatriciaUpdateConstants {
     globals_pow2: felt*,
+}
+
+// Splits the given list of dict accesses into two separate lists: one containing all read accesses
+// and the other containing all write accesses.
+//
+// Assumption: The keys in the update_ptr list are unique and sorted.
+func split_reads_writes(n_updates: felt, update_ptr: DictAccess*) -> (
+    n_reads: felt, reads: DictAccess*, n_writes: felt, writes: DictAccess*
+) {
+    alloc_locals;
+    let (local reads_start: DictAccess*) = alloc();
+    let (local writes_start: DictAccess*) = alloc();
+
+    let reads = reads_start;
+    let writes = writes_start;
+    with reads, writes {
+        split_reads_writes_inner(n_updates=n_updates, update_ptr=update_ptr);
+    }
+
+    return (
+        n_reads=(reads - reads_start) / DictAccess.SIZE,
+        reads=reads_start,
+        n_writes=(writes - writes_start) / DictAccess.SIZE,
+        writes=writes_start,
+    );
+}
+
+// Helper function for split_reads_writes.
+func split_reads_writes_inner{reads: DictAccess*, writes: DictAccess*}(
+    n_updates: felt, update_ptr: DictAccess*
+) -> () {
+    if (n_updates == 0) {
+        return ();
+    }
+    tempvar current_update = update_ptr[0];
+    if (current_update.prev_value == current_update.new_value) {
+        // Read.
+        assert reads[0] = current_update;
+        let reads = &reads[1];
+        return split_reads_writes_inner(n_updates=n_updates - 1, update_ptr=&update_ptr[1]);
+    }
+
+    // Write.
+    assert writes[0] = current_update;
+    let writes = &writes[1];
+    return split_reads_writes_inner(n_updates=n_updates - 1, update_ptr=&update_ptr[1]);
 }

@@ -1,4 +1,4 @@
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Iterable, List, Optional
 
 from starkware.cairo.common.poseidon_utils import PoseidonParams, hades_permutation
 from starkware.python.utils import blockify, from_bytes, to_bytes
@@ -44,7 +44,7 @@ def poseidon_hash_single(x: int, poseidon_params: Optional[PoseidonParams] = Non
 
 
 def poseidon_hash_many(
-    array: Sequence[int], poseidon_params: Optional[PoseidonParams] = None
+    array: Iterable[int], poseidon_params: Optional[PoseidonParams] = None
 ) -> int:
     """
     Hashes array of elements and retrieves a single field element output.
@@ -59,7 +59,7 @@ def poseidon_hash_many(
 
 
 def poseidon_hash_many_given_poseidon_perm(
-    array: Sequence[int],
+    array: Iterable[int],
     poseidon_perm: Callable[..., List[int]],
     poseidon_params: Optional[PoseidonParams] = None,
 ) -> int:

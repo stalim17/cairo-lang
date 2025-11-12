@@ -4,6 +4,7 @@ import cachetools
 
 import starkware.storage.metrics as storage_metrics
 from starkware.python.utils import safe_zip
+from starkware.storage.general_storage_config import GeneralStorageConfig
 from starkware.storage.storage import Storage
 
 
@@ -44,7 +45,11 @@ class CachedStorage(Storage):
 
     @classmethod
     async def create_from_config(
-        cls, storage_config: Dict[str, Any], max_size: int, metric_active: bool
+        cls,
+        storage_config: Dict[str, Any],
+        max_size: int,
+        metric_active: bool,
+        general_storage_config: GeneralStorageConfig,
     ) -> "CachedStorage":
         return cls(
             storage=await Storage.create_instance_from_config(config=storage_config),

@@ -7,7 +7,11 @@ py_library(
     srcs = [
         "eth_test_utils.py",
     ],
-    data = ["@npm_ganache//ganache/bin:ganache"],
+    data = [
+        "//bazel_utils:anvil",
+        "//bazel_utils:cast",
+        "@npm_ganache//ganache/bin:ganache",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":web3_wrapper_lib",

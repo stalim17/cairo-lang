@@ -24,6 +24,28 @@ def load_config(
         config_file_path = "/config.yml"
 
     config = yaml.safe_load(open(config_file_path, "r"))
+
+    # `yaml.safe_load` will return **None** in two common situations:
+    #   1. The file is completely empty.
+    #   2. The file’s entire content is the YAML literal `null`
+    #      (typically produced when you call `yaml.safe_dump(None, ...)`, or when
+    #      a dataclass/dict you’re dumping *itself* resolves to `None`.
+    #      A frequent way this happens in our codebase is:
+    #          - We have an optional config dataclass instance that ends up
+    #            being `None` **at dump time**, so `yaml.safe_dump(None, f)`
+    #            writes:
+    #
+    #                null
+    #                ...
+    #
+    #          - Later, reading that file with `safe_load` yields `None` again.
+    #
+    # Converting that `None` to `{}` ensures downstream code (including
+    # Marshmallow schemas that expect a mapping) always receives a dictionary
+    # and won’t crash with `ValidationError: {'_schema': ['Invalid input type.']}`.
+    if config is None:
+        config = {}
+
     if load_logging_config:
         logging.config.dictConfig(config.get("LOGGING", {}))
 

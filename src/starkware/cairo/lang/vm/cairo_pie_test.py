@@ -13,6 +13,7 @@ from pytest import MonkeyPatch
 from starkware.cairo.lang.cairo_constants import DEFAULT_PRIME
 from starkware.cairo.lang.compiler.cairo_compile import compile_cairo
 from starkware.cairo.lang.vm.cairo_pie import (
+    STWO_UNIQUE_OPCODES,
     CairoPie,
     CairoPieMetadata,
     ExecutionResources,
@@ -228,6 +229,8 @@ def test_dump_load_stwo_execution_resources():
     assert loaded.memory_tables_sizes == execution_resources_stwo.memory_tables_sizes
     assert loaded.n_memory_holes == execution_resources_stwo.n_memory_holes
     assert loaded.n_verify_instructions == execution_resources_stwo.n_verify_instructions
+    assert loaded.n_stwo_unique_opcodes == execution_resources_stwo.n_stwo_unique_opcodes
+    assert loaded.n_normal_opcodes == execution_resources_stwo.n_normal_opcodes
 
 
 def test_dumps_loads_stwo_execution_resources():
@@ -255,6 +258,8 @@ def test_dumps_loads_stwo_execution_resources():
     assert loaded.memory_tables_sizes == execution_resources_stwo.memory_tables_sizes
     assert loaded.n_memory_holes == execution_resources_stwo.n_memory_holes
     assert loaded.n_verify_instructions == execution_resources_stwo.n_verify_instructions
+    assert loaded.n_stwo_unique_opcodes == execution_resources_stwo.n_stwo_unique_opcodes
+    assert loaded.n_normal_opcodes == execution_resources_stwo.n_normal_opcodes
 
 
 @pytest.fixture
@@ -363,6 +368,33 @@ def test_n_steps_execution_resources_stwo(monkeypatch: MonkeyPatch):
     assert execution_resources.n_steps == expected_n_steps
 
 
+def test_n_opcodes_in_execution_resources_stwo(monkeypatch: MonkeyPatch):
+    """
+    Verifies that the properties `n_stwo_unique_opcodes` and
+    `n_normal_opcodes` of ExecutionResourcesStwo are calculated
+    correctly.
+    """
+    opcodes_instance_counter = {
+        "ret": 7,
+        "add_ap": 6,
+        "jmp_rel_imm": 5,
+        "jmp_abs": 4,
+        "blake_compress_opcode": 2,
+        "qm_31_add_mul_opcode": 3,
+    }
+
+    execution_resources = ExecutionResourcesStwo(
+        builtin_instance_counter={"output_builtin": 6, "pedersen_builtin": 3},
+        opcodes_instance_counter=opcodes_instance_counter,
+        memory_tables_sizes={"table1": 10, "table2": 20},
+        n_memory_holes=5,
+        n_verify_instructions=3,
+    )
+
+    assert execution_resources.n_stwo_unique_opcodes == 5
+    assert execution_resources.n_normal_opcodes == 22
+
+
 def test_add_execution_resources_stone(monkeypatch: MonkeyPatch):
     """
     Tests ExecutionResourcesStone.__add__().
@@ -420,6 +452,8 @@ def test_add_execution_resources_stwo(monkeypatch: MonkeyPatch):
     total_execution_resources = ExecutionResourcesStwo.empty()
     total_builtin_instance_counter: Dict[str, int] = {}
     total_memory_tables_sizes: Dict[str, int] = {}
+    total_n_stwo_unique_opcodes: int = 0
+    total_n_normal_opcodes: int = 0
 
     # Create multiple random ExecutionResourcesStwo objects, sum them using
     # __ add __() and validate the result.
@@ -463,6 +497,12 @@ def test_add_execution_resources_stwo(monkeypatch: MonkeyPatch):
             total_memory_tables_sizes, random_memory_tables_sizes
         )
 
+        for opcode, counter in random_opcode_counter.items():
+            if opcode in STWO_UNIQUE_OPCODES:
+                total_n_stwo_unique_opcodes += counter
+            else:
+                total_n_normal_opcodes += counter
+
         # Calculate total_execution_resources using __add__() function.
         total_execution_resources += execution_resources
 
@@ -471,6 +511,8 @@ def test_add_execution_resources_stwo(monkeypatch: MonkeyPatch):
     assert total_execution_resources.memory_tables_sizes == total_memory_tables_sizes
     assert total_execution_resources.n_memory_holes == random_n_execution_resources
     assert total_execution_resources.n_verify_instructions == random_n_execution_resources
+    assert total_execution_resources.n_stwo_unique_opcodes == total_n_stwo_unique_opcodes
+    assert total_execution_resources.n_normal_opcodes == total_n_normal_opcodes
 
 
 def test_sub_execution_resources_stwo(monkeypatch: MonkeyPatch):
@@ -481,7 +523,14 @@ def test_sub_execution_resources_stwo(monkeypatch: MonkeyPatch):
 
     execution_resources1 = ExecutionResourcesStwo(
         builtin_instance_counter={"builtin1": 1, "builtin2": 2, "builtin3": 1, "builtin4": 4},
-        opcodes_instance_counter={"opcode1": 1, "opcode2": 2, "opcode3": 1, "opcode4": 4},
+        opcodes_instance_counter={
+            "opcode1": 1,
+            "opcode2": 2,
+            "opcode3": 1,
+            "opcode4": 4,
+            "blake_compress_opcode": 1,
+            "qm_31_add_mul_opcode": 1,
+        },
         memory_tables_sizes={"table1": 1, "table2": 2, "table3": 3, "table4": 4},
         n_memory_holes=5,
         n_verify_instructions=10,
@@ -489,7 +538,14 @@ def test_sub_execution_resources_stwo(monkeypatch: MonkeyPatch):
 
     execution_resources2 = ExecutionResourcesStwo(
         builtin_instance_counter={"builtin1": 1, "builtin2": 2, "builtin3": 3, "builtin4": 4},
-        opcodes_instance_counter={"opcode1": 1, "opcode2": 2, "opcode3": 3, "opcode4": 4},
+        opcodes_instance_counter={
+            "opcode1": 1,
+            "opcode2": 2,
+            "opcode3": 3,
+            "opcode4": 4,
+            "blake_compress_opcode": 3,
+            "qm_31_add_mul_opcode": 2,
+        },
         memory_tables_sizes={"table1": 10, "table2": 20, "table3": 30, "table4": 40},
         n_memory_holes=15,
         n_verify_instructions=10,
@@ -504,10 +560,19 @@ def test_sub_execution_resources_stwo(monkeypatch: MonkeyPatch):
         "builtin3": 2,
         "builtin4": 0,
     }
-    assert diff.opcodes_instance_counter == {"opcode1": 0, "opcode2": 0, "opcode3": 2, "opcode4": 0}
+    assert diff.opcodes_instance_counter == {
+        "opcode1": 0,
+        "opcode2": 0,
+        "opcode3": 2,
+        "opcode4": 0,
+        "blake_compress_opcode": 2,
+        "qm_31_add_mul_opcode": 1,
+    }
     assert diff.memory_tables_sizes == {"table1": 9, "table2": 18, "table3": 27, "table4": 36}
     assert diff.n_memory_holes == 10
     assert diff.n_verify_instructions == 0
+    assert diff.n_stwo_unique_opcodes == 3
+    assert diff.n_normal_opcodes == 2
 
 
 def test_filter_unused_builtins(monkeypatch: MonkeyPatch):

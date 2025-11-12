@@ -41,6 +41,8 @@ CURRENT_CAIRO_PIE_VERSION = "1.1"
 
 MAX_N_STEPS = 2**30
 
+STWO_UNIQUE_OPCODES = ["blake_compress_opcode", "qm_31_add_mul_opcode"]
+
 
 @dataclasses.dataclass
 class SegmentInfo:
@@ -156,6 +158,10 @@ class ExecutionResources(ValidatedMarshmallowDataclass, ABC):
         assert (
             isinstance(self.n_memory_holes, int) and 0 <= self.n_memory_holes < 2**30
         ), f"Invalid n_memory_holes: {self.n_memory_holes}."
+
+    @classmethod
+    def empty(cls):
+        raise NotImplementedError(f"Should not be called from {cls.__name__} class.")
 
     def __add__(self, other: "ExecutionResources") -> "ExecutionResources":
         raise NotImplementedError(f"Should not be called from {self.__class__.__name__} class.")
@@ -301,6 +307,23 @@ class ExecutionResourcesStwo(ExecutionResources):
         """
         return sum(self.opcodes_instance_counter.values())
 
+    @property
+    def n_stwo_unique_opcodes(self) -> int:
+        """
+        Returns the total number of opcodes that are unique to Stwo.
+        """
+        return sum(
+            self.opcodes_instance_counter.get(stwo_unique_opcode, 0)
+            for stwo_unique_opcode in STWO_UNIQUE_OPCODES
+        )
+
+    @property
+    def n_normal_opcodes(self) -> int:
+        """
+        Returns the total number of "normal" opcodes (not ones that are unique to Stwo).
+        """
+        return self.n_steps - self.n_stwo_unique_opcodes
+
     def convert_to_stone(self) -> ExecutionResourcesStone:
         """
         Returns a ExecutionResourcesStone version of self.
@@ -414,6 +437,14 @@ class ExecutionResourcesStwo(ExecutionResources):
             n_verify_instructions=self.n_verify_instructions,
             n_memory_holes=self.n_memory_holes,
         )
+
+    def __repr__(self):
+        fields = dataclasses.asdict(self) | {
+            "n_stwo_unique_opcodes": self.n_stwo_unique_opcodes,
+            "n_normal_opcodes": self.n_normal_opcodes,
+        }
+        fields_str = ", ".join(f"{k}={v!r}" for k, v in fields.items())
+        return f"{self.__class__.__name__}({fields_str})"
 
 
 class ExecutionResourcesSchema(OneOfSchema):

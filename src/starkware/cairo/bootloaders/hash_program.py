@@ -52,6 +52,10 @@ def compute_program_hash_chain(
         )
 
 
+def get_pedersen_program_hash(program: Program) -> int:
+    return compute_program_hash_chain(program=program, program_hash_function=HashFunction.PEDERSEN)
+
+
 def main():
     parser = argparse.ArgumentParser(description="A tool to compute the hash of a cairo program")
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")

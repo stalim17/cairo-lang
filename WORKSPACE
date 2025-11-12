@@ -23,6 +23,26 @@ yarn_install(
 )
 
 http_file(
+    name = "anvil",
+    downloaded_file_path = "anvil",
+    executable = True,
+    sha256 = "839d5ed3c99ce527bbb0d68c91839b8d1fddb5e8e94fe5d716747b7b89bfea5f",
+    urls = [
+        "https://starkware-third-party.s3.us-east-2.amazonaws.com/foundry/anvil",
+    ],
+)
+
+http_file(
+    name = "cast",
+    downloaded_file_path = "cast",
+    executable = True,
+    sha256 = "2d902a06e36ea4d59dc2a68699d094a99c9cad2f2485c60dbb5bbb05bad6a31c",
+    urls = [
+        "https://starkware-third-party.s3.us-east-2.amazonaws.com/foundry/cast",
+    ],
+)
+
+http_file(
     name = "solc-0.6.12",
     downloaded_file_path = "solc-0.6.12",
     executable = True,
@@ -60,7 +80,7 @@ http_archive(
         "//src/starkware/starknet/compiler/v1:BUILD." + CAIRO_COMPILER_ARCHIVE,
     ),
     strip_prefix = "cairo",
-    url = "https://github.com/starkware-libs/cairo/releases/download/v2.12.0-dev.0/release-x86_64-unknown-linux-musl.tar.gz",
+    url = "https://github.com/starkware-libs/cairo/releases/download/v2.12.3/release-x86_64-unknown-linux-musl.tar.gz",
 )
 
 http_archive(

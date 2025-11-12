@@ -26,11 +26,6 @@ py_library(
         "//src/starkware/cairo/sharp:sharp_client_config_lib",
         "//src/starkware/cairo/sharp:sharp_client_lib",
         "//src/starkware/eth:starkware_eth_test_utils_lib",
-        "//src/starkware/starknet/business_logic/fact_state:starknet_business_logic_fact_state_lib",
-        "//src/starkware/starknet/business_logic/state:starknet_business_logic_state_lib",
-        "//src/starkware/starknet/core/os/block_hash:starknet_block_hash_lib",
-        "//src/starkware/starknet/core/test_contract:starknet_test_external_contract_test_utils_lib",
-        "//src/starkware/starknet/scripts:starknet_script_lib",
     ],
 )
 
